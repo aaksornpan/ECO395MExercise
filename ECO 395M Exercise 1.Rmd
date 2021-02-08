@@ -1,0 +1,323 @@
+---
+title: 'ECO 395M: Exercises 1'
+author: "Areeya Aksornpan"
+date: "2/7/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+##1) Data visualization: gas prices
+```{r}
+library(ggplot2)
+library(tidyverse)
+
+GasPrices = read.csv('~/Desktop/GasPrices.csv')
+
+##A
+ggplot(GasPrices, aes(x=Competitors, y=Price)) + geom_boxplot()
+```
+
+This boxplot shows that gas stations charge more if they lack direct competition in sight. When there are competitors, the maximum and average price decreases.
+
+```{r}
+##B
+ggplot(GasPrices, aes(x=Income, y=Price)) + geom_point()
+```
+
+This scatter plot shows that the richer the area, the higher the gas price. Lower gas prices are not sold in the richer area. There is a positive correlation between price and income. 
+
+```{r}
+##C
+ggplot(GasPrices, aes(x=Brand, y=Price)) + geom_col()
+```
+
+Although it is claimed that Shell charges more than other brands, this bar plot shows that the theory is unsupported by the data. Shell's price is higher than Chevron-Texaco and ExxonMobil, but there are other brands that sell gas in a higher price compare to Shell.
+
+
+```{r}
+##D
+ggplot(GasPrices) + 
+  geom_histogram(aes(x=Price, after_stat(density)), binwidth = 0.05) +
+  facet_wrap(~Stoplight)
+```
+
+This faceted histogram shows that gas stations at stoplights charge more. Gas are sold the most (high frequency) at $1.8 when there's no stoplight and $1.9 at stoplights. 
+
+```{r}
+##E
+ggplot(GasPrices, aes(x=Highway, y=Price)) + geom_boxplot()
+
+```
+This boxplot shows that gas stations with direct highway access charge more. The average price increases when there is direct highway access to the gas station. The minimum price increases from below $1.8 to approximately $1.85 and the maximum price increases from nearly $1.9 to close to $2.0. 
+
+
+
+##2) Data visualization: a bike share network
+```{r}
+library(ggplot2)
+library(tidyverse)
+
+bikeshare = read.csv('~/Desktop/bikeshare.csv')
+
+head(bikeshare)
+
+##Plot A: a line graph showing average bike rentals (total) versus hour of the day (hr).
+
+#Average bike rentals 
+bikerent_total1 = bikeshare %>%
+  group_by(hr) %>%
+  summarize(average_bike_rental = mean(total))
+
+
+#Plot the result over time in a line graph
+ggplot(bikerent_total1) + 
+  geom_line(aes(x=hr, y=average_bike_rental)) + scale_x_continuous(breaks = 0:24)
+```
+The x-axis is the hour which bikers rent bicycles and the y-axis is the average number of total bike rentals in that hour, including both casual and registered users. 
+
+Bicycle renters prefer to rent bicycles mostly around 8am and 5pm, which is before and after their working hours. There is also a slight increase from 10am to 12pm, which is when workers could have their lunch breaks. It also shows that people started leaving the house around 5am and going back home around 6pm. We could expect that if we attempt to rent a bicycle at 8am or 5pm, there is a high possibility that there is no bicycle available. 
+
+```{r}
+##Plot B: a faceted line graph showing average bike rentals versus hour of the day, faceted according to whether it is a working day (workingday).
+
+
+bikerent_total2 = bikeshare %>%
+  group_by(hr, workingday) %>%
+  summarize(average_bike_rental = mean(total))
+
+
+head(bikerent_total2, 30)
+
+ggplot(bikerent_total2) + 
+  geom_line(aes(x=hr, y=average_bike_rental, color=workingday)) +
+  facet_wrap(~workingday) 
+```
+The x-axis is the hour which bikers rent bicycles and the y-axis is the average number of total bike rentals in that hour, including both casual and registered users.
+
+The left graph is the average bike rentals versus hour of weekend or holiday. Bicycle renters prefer to rent bicycles mostly around noon. We can assume that people started leaving the house around 6am and going back home around 1pm. 
+
+The right graph is the average bike rentals versus hour of workingday. Bicycle renters prefer to rent bicycles mostly around 8am and 5pm, which is before and after working hours. We can assume that people started leaving the house around 5am and going back home around 6pm. 
+
+```{r}
+##Plot C: a faceted bar plot showing average ridership during the 8 AM hour by weather situation code (weathersit), faceted according to whether it is a working day or not. Note: remember you can focus on a specific subset of rows of a data set using filter, e.g.
+
+bikerent_total3 = bikeshare %>%
+  filter(hr==8) %>%
+group_by(weathersit, workingday) %>%
+  summarise(average_bike_rental = mean(total))
+
+head(bikerent_total3, 30)
+
+ggplot(bikerent_total3) + 
+  geom_col(aes(x=weathersit, y=average_bike_rental, color=workingday)) +
+  facet_wrap(~workingday)
+
+```
+The y-axis is average ridership during the 8 AM hour and the x-axis is the weather situation which is sorted as follow
+
+1: Clear, Few clouds, Partly cloudy, Partly cloudy
+
+2: Mist + Cloudy, Mist + Broken clouds, Mist + Few clouds, Mist
+
+3: Light Snow, Light Rain + Thunderstorm + Scattered clouds, Light Rain + Scattered clouds
+
+4: Heavy Rain + Ice Pallets + Thunderstorm + Mist, Snow + Fog
+
+The left graph is the average bike rentals versus weather situation on weekends or holidays, while the right graph is the average bike rentals versus weather situation on workdays. 
+
+Numbers of bike rentals on both graphs decreased as the weather situation got worsened. When there is light snow, light rain with scattered clouds or thunderstorm (3), the numbers of average bike rentals lessened by half. When it is mist(2), the number of average bike rental does not decrease much compare to when it is clear or cloudy (1). Since the weather condition lessens the number of bike rentals, we could expect a fewer number of bike rentals on a snowy or rainy day. 
+
+
+
+##3) Data visualization: flights at ABIA
+```{r}
+library(ggplot2)
+library(tidyverse)
+
+ABIA = read.csv('~/Desktop/ABIA.csv')
+
+head(ABIA)
+
+##What is the best time of year to fly to minimize delays, and does this change by destination? 
+
+ABIA_DepDelay1 = ABIA %>%
+  group_by(Month) %>%
+  summarize(ABIA_total1 = mean(na.omit(DepDelay)))
+
+Desination = c('AUS', 'DFW', 'IAH', 'PHX', 'DEN')
+
+ABIA_DepDelay2 = ABIA %>%
+  filter(Dest %in% Desination) %>%
+  group_by(Month, Dest) %>%
+  summarize(ABIA_total2 = mean(na.omit(DepDelay)))
+
+
+head(ABIA_DepDelay1, 100)
+
+ggplot(ABIA_DepDelay2) + 
+  geom_line(aes(x=Month, y=ABIA_total2)) +
+  facet_wrap(~Dest) +
+  scale_x_continuous(breaks = 1:12)
+
+  
+ggplot(ABIA_DepDelay2) + 
+  geom_line(aes(x=Month, y=ABIA_total2, color=Dest)) +
+  scale_x_continuous(breaks = 1:12)
+
+```
+
+All these five airports commonly have the least amount of delays in September and the most amount of delays in December, which refers that the destination does not affect the departure time and its' delay. It's possible that the weather is a major factor in delay. It could alternatively be the air traffic in December since it is the peak time of the high season.
+
+
+
+##4) K-nearest neighbors
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(rsample)
+library(caret)
+library(modelr)
+library(parallel)
+library(foreach)
+
+sclass = read.csv('~/Desktop/sclass.csv')
+
+
+##350
+model350 = sclass %>%
+  filter(trim %in% '350')
+
+#1.Split the data into a training and a testing set.
+  
+sclass350_split =  initial_split(model350, prop=0.9)
+sclass350_train = training(sclass350_split)
+sclass350_test  = testing(sclass350_split)
+
+
+#2.Run K-nearest-neighbors, for many different values of K, starting at K=2 and going as high as you need to. For each value of K, fit the model to the training set and make predictions on your test set.
+
+K_folds = 5
+
+
+model350 = model350 %>%
+  mutate(fold_id = rep(1:K_folds, length=nrow(model350)) %>% sample)
+
+head(model350)
+
+
+#3.Calculate the out-of-sample root mean-squared error (RMSE) for each value of K.
+
+rmse_cv = foreach(fold = 1:K_folds, .combine='c') %do% {
+  knn100 = knnreg(price ~ mileage,
+                  data=filter(model350, fold_id != fold), k=100)
+  modelr::rmse(knn100, data=filter(model350, fold_id == fold))
+}
+
+k_grid = c(2, 3, 4, 6, 8, 10, 15, 20, 25, 30, 35, 40, 45,
+           50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100)
+
+model350_folds = crossv_kfold(model350, k=K_folds)
+
+cv_grid = foreach(k = k_grid, .combine='rbind') %dopar% {
+  models = map(model350_folds$train, ~ knnreg(price ~ mileage, k=k, data = ., use.all=FALSE))
+  errs = map2_dbl(models, model350_folds$test, modelr::rmse)
+  c(k=k, err = mean(errs), std_err = sd(errs)/sqrt(K_folds))
+} %>% as.data.frame
+
+head(cv_grid)
+
+#RMSE versus K plot
+
+ggplot(cv_grid) + 
+  geom_point(aes(x=k, y=err)) + 
+  geom_errorbar(aes(x=k, ymin = err-std_err, ymax = err+std_err)) +
+  scale_x_log10()
+
+#For the optimal value of K (k=10), plot of the fitted model i.e. price prediction vs. mileage
+
+knn10 = knnreg(price ~ mileage, data=sclass350_train, k=10)
+
+sclass350_test = sclass350_test %>%
+  mutate(price_pred = predict(knn10, sclass350_test))
+
+p_test = ggplot(data = sclass350_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.2)
+p_test
+
+
+p_test + geom_line(aes(x = mileage, y = price_pred), color='red', size=0.5)
+
+
+
+
+##65 AMG
+model65AMG = sclass %>%
+  filter(trim %in% '65 AMG')
+
+#1.Split the data into a training and a testing set.
+
+sclass65AMG_split =  initial_split(model65AMG, prop=0.9)
+sclass65AMG_train = training(sclass65AMG_split)
+sclass65AMG_test  = testing(sclass65AMG_split)
+
+#2.Run K-nearest-neighbors, for many different values of K, starting at K=2 and going as high as you need to. For each value of K, fit the model to the training set and make predictions on your test set.
+
+K_folds = 5
+
+
+model65AMG = model65AMG %>%
+  mutate(fold_id = rep(1:K_folds, length=nrow(model65AMG)) %>% sample)
+
+
+#3.Calculate the out-of-sample root mean-squared error (RMSE) for each value of K.
+
+rmse_cv = foreach(fold = 1:K_folds, .combine='c') %do% {
+  knn100 = knnreg(price ~ mileage,
+                  data=filter(model65AMG, fold_id != fold), k=100)
+  modelr::rmse(knn100, data=filter(model350, fold_id == fold))
+}
+
+
+k_grid = c(2, 3, 4, 6, 8, 10, 15, 20, 25, 30, 35, 40, 45,
+           50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100)
+
+model65AMG_folds = crossv_kfold(model65AMG, k=K_folds)
+
+cv_grid = foreach(k = k_grid, .combine='rbind') %dopar% {
+  models = map(model65AMG_folds$train, ~ knnreg(price ~ mileage, k=k, data = ., use.all=FALSE))
+  errs = map2_dbl(models, model65AMG_folds$test, modelr::rmse)
+  c(k=k, err = mean(errs), std_err = sd(errs)/sqrt(K_folds))
+} %>% as.data.frame
+
+head(cv_grid)
+
+#RMSE versus K plot
+
+ggplot(cv_grid) + 
+  geom_point(aes(x=k, y=err)) + 
+  geom_errorbar(aes(x=k, ymin = err-std_err, ymax = err+std_err)) +
+  scale_x_log10()
+
+#For the optimal value of K (k=15), plot of the fitted model i.e. price prediction vs. mileage
+
+knn15 = knnreg(price ~ mileage, data=sclass65AMG_train, k=15)
+
+sclass65AMG_test = sclass65AMG_test %>%
+  mutate(price_pred = predict(knn10, sclass65AMG_test))
+
+p_test = ggplot(data = sclass65AMG_test) + 
+  geom_point(mapping = aes(x = mileage, y = price), alpha=0.2)
+p_test
+
+
+p_test + geom_line(aes(x = mileage, y = price_pred), color='red', size=0.5) 
+
+```
+Which trim yields a larger optimal value of K? Why do you think this is?
+
+The car's trim level 65 AMG yields a larger optimal value of K. The lowest out-of-sample root mean-squared error of 65 AMG is lower than 350.
