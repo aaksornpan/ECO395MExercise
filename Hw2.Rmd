@@ -1,0 +1,755 @@
+---
+title: "Hw2"
+author: "Areeya Aksornpan, Zayd Abdalla"
+date: "3/15/2021"
+output: pdf_document
+---
+
+## R Markdown
+
+
+```{r}
+library(mosaic)
+library(mosaicData)
+library(tidyverse)
+library(tidymodels)
+library(tidyquant)
+library(estimatr)
+library(gcookbook)
+library(ggthemes)
+library(kknn)
+library(glmnet)
+library(lubridate)
+library(scales)
+library(patchwork)
+library(hrbrthemes)
+library(kableExtra)
+```
+## Problem 1: visualization
+```{r}
+
+read_data <- function(df) {
+  path <- paste("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/", 
+                     df, sep = "")
+  df <- read_csv(path)
+  return(df)
+}
+
+capmetro <- read_data("capmetro_UT.csv") %>%
+  mutate(day_of_week = factor(day_of_week,
+                              levels = c("Mon", "Tue", "Wed","Thu",
+                                         "Fri","Sat","Sun")),
+         month = factor(month, levels = c("Sep", "Oct","Nov")))
+
+Figure1 <- 
+  capmetro %>%
+  group_by(hour_of_day, day_of_week, month) %>%
+  mutate(avg_boarding = mean(boarding)) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_line(aes(x = hour_of_day, y = avg_boarding, color = month)) +
+  scale_x_continuous(expand = c(0,0), limits = c(0, 24), 
+                     breaks = seq(10, 20, 5)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 200)) +
+  scale_color_ft("Month") +
+  facet_wrap(. ~ day_of_week, scales = "free") + 
+  labs(x = "Hour of day", y = "Average boarding",
+       title = "Average bus ridership around UT",
+       subtitle = "Tracked by Optical Scanner",
+       caption = "Source: Capital Metro") + 
+  theme_ipsum(grid = "XY", axis = "xy") 
+
+Figure1
+```
+#Figure1 illustrates the average CapMetro bus boardings-tracked by Optical Scanner-on weekdays in September, October, and November. The hour of peak boarding appears broadly similar across days, generally peaking around the 17th hour (5pm). This result is intuitive since most people finish school/work around that time. However, weekends tend to not peak in average bus boardings around certain hours as sharply, which supports my intuition that these trends are indicating work commutes. One guess for the decline in average boardings on Mondays in September is that the first Monday of September is Labor Day. Since Labor Day is a holiday, work commutes that day will decline relative to other Mondays, so the average bus boardings in September declines. One guess for the decline in average boardings on Weds/Thurs/Fri in November are because many schools and occupations go on break after the Tuesday before Thanksgiving, which gives people time off from work, so they are less likely to commute on those days.
+
+```{r}
+Figure2 <-
+  capmetro %>%
+  group_by(timestamp, hour_of_day) %>%
+  mutate(avg_boarding = mean(boarding)) %>%
+  ggplot() +
+  geom_point(aes(x = temperature, y = avg_boarding, color = weekend)) +
+  scale_x_continuous(expand = c(0,0), limits = c(30, 100), 
+                     breaks = seq(40, 100, 20)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 300)) +
+  scale_color_ft() +
+  facet_wrap(. ~ hour_of_day, scales = "free") +  
+  labs(x = "Temperature", y = "Boarding",
+       title = "Average bus ridership around UT by temperature",
+       subtitle = "Faceted by hour of day",
+       caption = "Source: Capital Metro") + 
+  theme_ipsum(grid = "XY", axis = "xy") +
+  theme(legend.title = element_blank()) 
+
+Figure2
+```
+#Figure2 shows average ridership, by temperature, which is faceted by hour of the day (6am to 10pm), and averaged by 15-minute increments. Gray indicates weekdays and blue indicates weekends. When we hold hour of day and weekend status constant, temperature does not appear to noticeably change the average ridership of UT students. The changes in bus demand seems to be more related to the time of day since the average boardings at each hour is pretty similar across temperatures. 
+
+## Problem 2: Saratoga House Prices
+
+```{r}
+
+saratoga <- mosaicData::SaratogaHouses
+
+#create the train/test split.
+
+set.seed(300)
+
+saratoga_split <- initial_split(saratoga, strata = "price", prop = 0.75)
+saratoga_train <- training(saratoga_split)
+saratoga_test  <- testing(saratoga_split)
+
+dim(saratoga_train)
+dim(saratoga_split)
+
+#use cross-validation to split training set into k-folds.
+
+# 3 fold cross validation 
+saratoga_fold <- vfold_cv(saratoga_train, v = 3, repeats = 1, strata = "price")
+
+# Linear and Knn models
+lin_mod <-
+    linear_reg() %>%
+    set_mode("regression") %>%
+    set_engine("lm")
+lin_mod
+
+knn_mod <-
+  nearest_neighbor(
+    mode = "regression",
+    neighbors = tune("K"),
+  ) %>%
+  set_engine("kknn")
+knn_mod
+
+#Use tidymodels to feature engineer: rescaling and standardizing variables
+saratoga_wf <-
+  workflow() %>%
+  add_formula(price ~ .) %>%
+  # log price
+  step_log(price) %>%
+  # mean impute numeric variables
+  step_meanimpute(all_numeric(), -all_outcomes()) %>%
+  # rescale all numeric variables to lie between 0 and 1
+  step_range(all_numeric(), min = 0, max = 1) %>%
+  # one-hot
+  step_dummy(fuel, centralAir, heating, newConstruction, waterfront, sewer) %>%
+  # remove predictor variables that are almost the same for every entry
+  step_nzv(all_predictors()) 
+saratoga_wf
+
+#Fitting LM model
+
+set.seed(400)
+lm_rs <- 
+  saratoga_wf %>%
+  add_model(lin_mod) %>%
+  fit_resamples(
+    resamples = saratoga_fold,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+
+#Fitting KNN model
+
+
+set.seed(400)
+# feature engineering
+knn_recipe <- 
+  recipe(price ~ ., data = saratoga_train) %>%
+  # log price
+  step_log(price) %>%
+  # mean impute numeric variables
+  step_meanimpute(all_numeric(), -all_outcomes()) %>%
+  # rescale all numeric variables to lie between 0 and 1
+  step_range(all_numeric(), min = 0, max = 1) %>%
+  # one-hot
+  step_dummy(fuel, centralAir, heating, newConstruction, waterfront, sewer) %>%
+  # remove predictor variables that are almost the same for every entry
+  step_nzv(all_predictors()) 
+# workflow
+knn_wf <- 
+  workflow() %>%
+  add_model(knn_mod) %>%
+  add_recipe(knn_recipe)
+# hyperparameter tuning
+gridvals <- tibble(K = seq(1, 200))
+
+knn_rs <- 
+  knn_wf %>%
+  tune_grid(
+    resamples = saratoga_fold,
+    grid = gridvals,
+    control = control_resamples(save_pred = TRUE)) 
+knn_rs
+
+set.seed(400)
+
+# Display only minimum RMSE
+knn_min <- knn_rs %>%
+  collect_metrics() %>% 
+  filter(.metric == "rmse") %>%
+  filter(mean == min(mean))
+knn_min
+
+
+## Evaluate Models
+
+# Evaluate Linear Model
+final_lm_wf <- 
+  saratoga_wf %>%
+  add_model(lin_mod) 
+  
+lm_fit <- 
+  final_lm_wf %>%
+  last_fit(split = saratoga_split)
+lm_fit %>% collect_metrics()
+lm_results <-
+  lm_fit %>%
+  collect_predictions()
+# view results
+lm_results
+
+
+lm_fit$.workflow[[1]] %>% 
+  tidy() %>% 
+  kable(digits = 4, "pipe") 
+
+# LM Graphically
+lm_results %>%
+  ggplot(aes(.pred, price)) +
+  geom_abline(lty = 2, color = "black", size = 1) +
+  geom_point(alpha = 0.5, color = "dark green") +
+  labs(
+    title = 'Linear Regression Results',
+    x = "Truth",
+    y = "Predicted price",
+    color = NULL
+  ) + 
+  theme_ipsum()
+
+# Evaluate KNN Model
+
+final_knn_wf <- 
+  knn_wf %>% 
+  finalize_workflow(knn_min)
+knn_fit <- 
+  final_knn_wf %>% 
+  last_fit(split = saratoga_split)
+knn_fit %>% collect_metrics()
+
+# predictions
+knn_results <- 
+  knn_fit %>% 
+  collect_predictions()
+# view results
+knn_results
+
+# KNN Graphically
+knn_results %>%
+  ggplot(aes(.pred, price)) +
+  geom_abline(lty = 2, color = "black", size = 1) +
+  geom_point(alpha = 0.5, color = "dark green") +
+  labs(
+    title = 'KNN Regression Results',
+    x = "Truth",
+    y = "Predicted price",
+    color = NULL
+  ) + 
+  theme_ipsum()
+```
+# We built two models-a linear model and a KNN model-to predict the price of houses. The base model appeared to perform quite well, so we decided to tweak it by feature engineering to improve the accuracy. We standardized numeric variables to values between (0,1), applied a log transformation to the price variable and created dummy variables for all "character" encoded variables. Next, both our linear and KNN regression models were trained on 3 folds without repetition. We gave the KNN model a hyperparameter (neighbors) that was tuned using a tuning grid. Then, these models were fit on out-of-sample data and we found that our linear model clearly outperformed the medium model from class. However, our KNN model heavily outperformed even our improved linear model. This exercise illustrates the capability of KNN models to adapt to non-linearities of the data in order to achieve better fits in predicting pricing of houses. 
+
+## Problem 3: Classification and retrospective sampling
+```{r}
+
+german_credit <- 
+  read_data("german_credit.csv") %>% 
+  select(-1) %>%
+  # Factoring outcomes 
+  mutate(Default = as.factor(Default))
+
+# Build logistic regression model
+
+
+german_credit %>%
+  group_by(Default, history) %>%
+  add_tally() %>% 
+  rename(num_default = n) %>% 
+  distinct(history, num_default) %>%
+  ungroup() %>%
+  group_by(history) %>%
+  mutate(tot_default = sum(num_default),
+         prob_default = (num_default / tot_default) * 100) %>%
+  filter(Default == 0) %>%
+  ggplot() +
+  geom_col(aes(x = history, y = prob_default, 
+             fill = history)) + 
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  scale_x_discrete(labels = c("Good", "Poor", "Terrible")) +
+  scale_fill_ft() +
+  labs(x = "History", y = "Probability of Default",
+       title = "Probability of credit default by credit history") +
+  theme_ipsum(grid = "Y") + 
+  theme(legend.title = element_blank(),
+        legend.position = "None")
+
+
+
+
+# Train test
+set.seed(395)
+german_split <- initial_split(german_credit, strata = "Default", prop = 0.75)
+german_train <- training(german_split)
+german_test  <- testing(german_split)
+# 3 fold cross validation (for speed)
+german_fold <- vfold_cv(german_train, v = 3, repeats = 1, strata = "Default")
+german_fold 
+
+
+# Model engine
+
+log_mod <-
+  logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet") %>% 
+  set_mode("classification") 
+log_mod
+
+
+# recipe and workflow.
+
+set.seed(350)
+# varlist to keep
+varlist <- c("Default", "duration", "amount", "installment", "age", 
+             "history", "purpose", "foreign")
+# recipe
+log_rec <- 
+  recipe(Default ~ ., data = german_train) %>%
+  # remove vars not in varlist
+  step_rm(setdiff(colnames(german_credit), varlist)) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_normalize(all_predictors())
+  
+# workflow
+log_wf <- 
+  workflow() %>%
+  add_model(log_mod) %>%
+  add_recipe(log_rec)
+
+
+# Tune grid
+
+
+log_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 30))
+
+set.seed(350)
+log_rs <- 
+  log_wf %>% 
+  tune_grid(german_fold,
+            grid = log_grid,
+            control = control_grid(save_pred = TRUE),
+            metrics = metric_set(roc_auc))
+log_rs
+
+log_rs %>% 
+  collect_metrics() %>% 
+  ggplot(aes(x = penalty, y = mean)) + 
+  geom_point() + 
+  geom_line() + 
+  ylab("Area under the ROC Curve") +
+  scale_x_log10(labels = scales::label_number()) + 
+  theme_ipsum()
+
+top_models <-
+  log_rs %>% 
+  show_best("roc_auc", n = 20) %>% 
+  arrange(penalty) 
+top_models %>% kbl(format = "pipe", booktabs = T)
+
+log_rs %>%
+  select_best()
+
+# Model 10 seems to be the best
+# Graphically 
+log_best <- 
+  log_rs %>% 
+  collect_metrics() %>% 
+  arrange(penalty) %>% 
+  slice(10)
+log_auc <- 
+  log_rs %>% 
+  collect_predictions(parameters = log_best) %>% 
+  roc_curve(Default, .pred_0) %>% 
+  mutate(model = "Logistic Regression")
+autoplot(log_auc)
+
+final_log_wf <- 
+  log_wf %>% 
+  finalize_workflow(log_best)
+log_fit <- 
+  final_log_wf %>% 
+  last_fit(split = german_split)
+log_fit %>% collect_metrics()
+log_results <- 
+  log_fit %>% 
+  collect_predictions()
+
+log_results
+
+log_results %>% 
+  roc_curve(Default, .pred_0) %>% 
+  autoplot()
+
+
+# Confusion matrix
+cm <- log_results %>%
+  conf_mat(Default, .pred_class)
+cm
+
+# Poor sampling
+german_credit %>% 
+  group_by(history) %>% 
+  tally() %>%
+  kbl(format = "pipe")
+
+```
+# Our model is accurate roughly 74.4 percent of the time, which is not ideal since our null model that assumes no one will default would be correct 70 percent of the time. We believe the data is not likely ideal for predicting due to the weight of the poorly sampled history variable. Specifically, observe the vast disparity in sampling above.
+
+## Problem 4: Children and Hotel Reservations
+```{r}
+
+hotels_dev <- 
+  read_data("hotels_dev.csv") %>%
+  mutate(children = as.factor(children))
+
+  hotels_dev %>%
+  count(children) %>%
+  mutate(prop = round( n/sum(n), 3)) %>%
+  mutate(children = if_else(children == 1, "children", "none")) %>%
+  kbl("pipe")
+
+
+# Children only make up about 8% of the sample
+
+hotel_splits <- initial_split(hotels_dev, strata = children)
+hotel_train <- training(hotel_splits)
+hotel_test <- testing(hotel_splits)
+
+train_val_set <- validation_split(hotel_train, strata = children, prop = 0.8)
+
+# Proportion of children in train/test
+# train
+hotel_train %>%
+  count(children) %>%
+  mutate(prop = round( n/sum(n), 3)) %>%
+  mutate(children = if_else(children == 1, "children", "none")) %>%
+  kbl("pipe")
+
+# test
+hotel_test %>%
+  count(children) %>%
+  mutate(prop = round( n/sum(n), 3)) %>%
+  mutate(children = if_else(children == 1, "children", "none")) %>%
+  kbl("pipe")
+
+
+# Both the splits are similar in proportion for children and no children.
+
+## Baseline models
+
+# penalized logistic regression model 
+
+log_mod_base1 <- 
+  logistic_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+# Preprocess recipe
+log_mod_base1_recipe <-
+  recipe(children ~ market_segment + adults + customer_type + is_repeated_guest,
+         data = hotel_train) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors())
+
+# Preprocess
+log_mod_base1_wrkflow <-
+  workflow() %>%
+  add_model(log_mod_base1) %>%
+  add_recipe(log_mod_base1_recipe)
+
+
+# Tune hyperparameter
+
+lr_reg_grid <- tibble(penalty = 10^seq(-4, -1, length.out = 30))
+log_base1_res <- 
+  log_mod_base1_wrkflow %>%
+  tune_grid(train_val_set,
+            grid = lr_reg_grid,
+            control = control_grid(save_pred = T),
+            metrics = metric_set(roc_auc))
+
+
+# select the best model
+log_base1_res %>% 
+  select_best()
+best_mod_base1 <- 
+  log_base1_res %>%
+  collect_metrics() %>%
+  slice(11)
+
+# roc curve
+log_base1_res %>%
+  collect_predictions(parameters = best_mod_base1) %>%
+  roc_curve(children, .pred_0) %>% 
+  mutate(model = "Logistic Regression") %>%
+  autoplot() 
+
+# This is awful
+# Confusion matrix
+
+param_final <- 
+  log_base1_res %>%
+  select_best(metric = "roc_auc")
+log_mod_base1_wrkflow <-
+  log_mod_base1_wrkflow %>% 
+  finalize_workflow(param_final)
+base1_fit <- 
+  log_mod_base1_wrkflow %>%
+  last_fit(hotel_splits)
+base1_pred <-
+  base1_fit %>%
+  collect_predictions()
+base1_pred %>% 
+  conf_mat(truth = children, estimate = .pred_class)
+
+
+# Baseline 2
+
+# Preprocess recipe
+holidays <- c("AllSouls", "AshWednesday", "ChristmasEve", "Easter", 
+              "ChristmasDay", "GoodFriday", "NewYearsDay", "PalmSunday")
+log_mod_base2_recipe <-
+  recipe(children ~ .,
+         data = hotel_train) %>%
+  
+  step_date(arrival_date) %>% 
+  step_holiday(arrival_date, holidays = holidays) %>% 
+  step_rm(arrival_date) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors())
+# Preprocess
+log_mod_base2_wrkflow <-
+  workflow() %>%
+  add_model(log_mod_base1) %>%
+  add_recipe(log_mod_base2_recipe)
+
+
+# Tune Hyperparameter
+
+log_base2_res <- 
+  log_mod_base2_wrkflow %>%
+  tune_grid(train_val_set,
+            grid = lr_reg_grid,
+            control = control_grid(save_pred = T),
+            metrics = metric_set(roc_auc))
+
+
+log_base2_res %>% 
+  collect_metrics() %>% 
+  ggplot(aes(x = penalty, y = mean)) + 
+  geom_point() + 
+  geom_line() + 
+  ylab("Area under the ROC Curve") +
+  scale_x_log10(labels = scales::label_number()) + 
+  theme_clean()
+
+
+# select the best model
+log_base2_res %>% 
+  select_best()
+best_mod_base2 <- 
+  log_base1_res %>%
+  collect_metrics() %>%
+  slice(14)
+
+# roc curve
+log_base2_res %>%
+  collect_predictions(parameters = best_mod_base2) %>%
+  roc_curve(children, .pred_0) %>% 
+  mutate(model = "Logistic Regression") %>%
+  autoplot() 
+
+
+# Not great, but better than baseline1 at least
+
+param_final <- 
+  log_base2_res %>%
+  select_best(metric = "roc_auc")
+log_mod_base2_wrkflow <-
+  log_mod_base2_wrkflow %>% 
+  finalize_workflow(param_final)
+base2_fit <- 
+  log_mod_base2_wrkflow %>%
+  last_fit(hotel_splits)
+base2_pred <-
+  base2_fit %>%
+  collect_predictions()
+base2_pred %>% 
+  conf_mat(truth = children, estimate = .pred_class)
+
+# Better
+
+
+## Best Linear Model
+
+
+set.seed(400)
+# train/test
+
+hotel_splits2 <- initial_split(hotels_dev, strata = children)
+hotel_train2 <- training(hotel_splits2)
+hotel_test2 <- testing(hotel_splits2)
+
+# cross-val folds
+hotel_cv <- vfold_cv(hotel_train2, v = 10, repeats = 1, strata = children)
+
+# validation set
+hotels_val <- read_data("hotels_val.csv") %>%
+  mutate(children = as.factor(children))
+log_mod_rec <-
+  recipe(children ~ .,
+         data = hotel_train2) %>%
+  
+  step_date(arrival_date) %>% 
+  step_holiday(arrival_date, holidays = timeDate::listHolidays("US")) %>% 
+  step_rm(arrival_date) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors())
+log_mod <- 
+  logistic_reg(penalty = tune(), mixture = 1) %>%
+  set_engine("glmnet")
+
+# Preprocess
+log_mod_wrkflow <-
+  workflow() %>%
+  add_model(log_mod) %>%
+  add_recipe(log_mod_rec)
+
+# fit to  validation set
+hotel_res <-
+  log_mod_wrkflow %>%
+  tune_grid(grid = lr_reg_grid,
+            resamples = hotel_cv,
+            control = control_grid(save_pred = T),
+            metrics = metric_set(roc_auc))
+top_models <-
+  hotel_res %>% 
+  show_best("roc_auc", n = 15) %>% 
+  arrange(penalty) 
+hotel_best <- 
+  hotel_res %>% 
+  collect_metrics() %>% 
+  arrange(penalty) %>% 
+  slice(12)
+
+hotel_best %>% kbl("pipe")
+
+
+# roc curve
+hotel_res %>%
+  collect_predictions(parameters = hotel_best) %>%
+  roc_curve(children, .pred_0) %>% 
+  mutate(model = "Logistic Regression") %>%
+  autoplot() 
+
+
+### Model Validation 1 using new dataset
+
+trained_wf <-
+  log_mod_wrkflow %>%
+  finalize_workflow(hotel_best) %>%
+  fit(hotels_dev)
+hotel_preds <-
+  trained_wf %>%
+  predict(hotels_val) %>%
+  bind_cols(hotels_val %>% select(children))
+hotel_final_pred <- 
+  trained_wf %>%
+  predict(hotels_val, type = "prob") %>%
+  bind_cols(hotel_preds)
+hotel_final_pred %>%
+  conf_mat(truth = children, .pred_class)
+hotel_final_pred %>% 
+  roc_curve(children, .pred_0) %>% 
+  mutate(model = "Logistic Regression") %>%
+  autoplot()
+
+
+
+### Model Validation 2
+
+# create v-folds
+hotel_folds <- vfold_cv(hotels_val, v = 20)
+
+
+hotel_fold_fit <- 
+  trained_wf %>%
+  fit_resamples(
+    resamples = hotel_folds,
+    control = control_resamples(save_pred = TRUE)
+  )
+
+
+# predicted probabilities
+pred_sums <- list()
+for (i in 1:20) {
+  pred_sums <-
+    hotel_fold_fit$.predictions[[i]] %>%
+    summarize(sum_pred = sum(as.numeric(.pred_class))) %>%
+    pull(sum_pred) %>% 
+    append(pred_sums)
+}
+
+# actual probabilities
+actual_sums <- list()
+for (i in 1:20) {
+  actual_sums <-
+    hotel_fold_fit$.predictions[[i]] %>%
+    summarize(sum_actual = sum(as.numeric(children))) %>%
+    pull(sum_actual) %>% 
+    append(actual_sums)
+}
+# colnames
+names <- tibble("Folds" = c("Actual", "Predicted"))
+
+probs <-
+  as_tibble(actual_sums, .name_repair = "unique") %>% 
+  rbind(as_tibble(pred_sums, .name_repair = "unique")) 
+# Table
+cbind(names, probs) %>%
+  kable(col.names = 
+          append("Folds", make.unique(c("Folds", rep("v", 21)), sep = "")[3:22]),
+        caption = "Sum of probabilities")
+
+
+tibble(fold = seq(1, 20, 1), 
+       Actual = unlist(actual_sums), 
+       Prediction = unlist(pred_sums)) %>%
+  pivot_longer(!fold, names_to = "names", values_to = "vals") %>%
+  ggplot() +
+  geom_point(aes(x = fold, y = vals, color = names))  + 
+  labs(x = "Fold", y = "Sum of probabilies") + 
+  scale_x_continuous(breaks = seq(1, 20, 1)) +
+  scale_color_brewer(palette = "Set1") + 
+  theme_clean() + 
+  theme(legend.title = element_blank())
+
+mean_err <- sum(probs[1,] - probs[2,]) / 20
+glue::glue("The average mean error is {mean_err}")
+```
+# The sum of probabilities is fairly similar across folds. 

@@ -124,7 +124,7 @@ library(caret)
 library(modelr)
 library(parallel)
 library(foreach)
-sclass = read.csv('~/Desktop/sclass.csv')
+sclass = read.csv('~/Desktop/DataMining/sclass.csv')
 ##350
 model350 = sclass %>%
   filter(trim %in% '350')
@@ -144,6 +144,7 @@ rmse_cv = foreach(fold = 1:K_folds, .combine='c') %do% {
                   data=filter(model350, fold_id != fold), k=100)
   modelr::rmse(knn100, data=filter(model350, fold_id == fold))
 }
+rmse_cv
 k_grid = c(2, 3, 4, 6, 8, 10, 15, 20, 25, 30, 35, 40, 45,
            50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100)
 model350_folds = crossv_kfold(model350, k=K_folds)
