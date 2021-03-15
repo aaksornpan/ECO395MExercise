@@ -2,13 +2,15 @@
 title: "Hw2"
 author: "Areeya Aksornpan, Zayd Abdalla"
 date: "3/15/2021"
-output: pdf_document
+output:
+  html_document:
+    df_print: paged
 ---
 
 ## R Markdown
 
 
-```{r}
+```{r setup, include=FALSE}
 library(mosaic)
 library(mosaicData)
 library(tidyverse)
@@ -58,10 +60,8 @@ Figure1 <-
        subtitle = "Tracked by Optical Scanner",
        caption = "Source: Capital Metro") + 
   theme_ipsum(grid = "XY", axis = "xy") 
-
-Figure1
 ```
-#Figure1 illustrates the average CapMetro bus boardings-tracked by Optical Scanner-on weekdays in September, October, and November. The hour of peak boarding appears broadly similar across days, generally peaking around the 17th hour (5pm). This result is intuitive since most people finish school/work around that time. However, weekends tend to not peak in average bus boardings around certain hours as sharply, which supports my intuition that these trends are indicating work commutes. One guess for the decline in average boardings on Mondays in September is that the first Monday of September is Labor Day. Since Labor Day is a holiday, work commutes that day will decline relative to other Mondays, so the average bus boardings in September declines. One guess for the decline in average boardings on Weds/Thurs/Fri in November are because many schools and occupations go on break after the Tuesday before Thanksgiving, which gives people time off from work, so they are less likely to commute on those days.
+Figure1 illustrates the average CapMetro bus boardings-tracked by Optical Scanner-on weekdays in September, October, and November. The hour of peak boarding appears broadly similar across days, generally peaking around the 17th hour (5pm). This result is intuitive since most people finish school/work around that time. However, weekends tend to not peak in average bus boardings around certain hours as sharply, which supports my intuition that these trends are indicating work commutes. One guess for the decline in average boardings on Mondays in September is that the first Monday of September is Labor Day. Since Labor Day is a holiday, work commutes that day will decline relative to other Mondays, so the average bus boardings in September declines. One guess for the decline in average boardings on Weds/Thurs/Fri in November are because many schools and occupations go on break after the Tuesday before Thanksgiving, which gives people time off from work, so they are less likely to commute on those days.
 
 ```{r}
 Figure2 <-
@@ -81,10 +81,8 @@ Figure2 <-
        caption = "Source: Capital Metro") + 
   theme_ipsum(grid = "XY", axis = "xy") +
   theme(legend.title = element_blank()) 
-
-Figure2
 ```
-#Figure2 shows average ridership, by temperature, which is faceted by hour of the day (6am to 10pm), and averaged by 15-minute increments. Gray indicates weekdays and blue indicates weekends. When we hold hour of day and weekend status constant, temperature does not appear to noticeably change the average ridership of UT students. The changes in bus demand seems to be more related to the time of day since the average boardings at each hour is pretty similar across temperatures. 
+Figure2 shows average ridership, by temperature, which is faceted by hour of the day (6am to 10pm), and averaged by 15-minute increments. Gray indicates weekdays and blue indicates weekends. When we hold hour of day and weekend status constant, temperature does not appear to noticeably change the average ridership of UT students. The changes in bus demand seems to be more related to the time of day since the average boardings at each hour is pretty similar across temperatures. 
 
 ## Problem 2: Saratoga House Prices
 
@@ -259,7 +257,7 @@ knn_results %>%
   ) + 
   theme_ipsum()
 ```
-# We built two models-a linear model and a KNN model-to predict the price of houses. The base model appeared to perform quite well, so we decided to tweak it by feature engineering to improve the accuracy. We standardized numeric variables to values between (0,1), applied a log transformation to the price variable and created dummy variables for all "character" encoded variables. Next, both our linear and KNN regression models were trained on 3 folds without repetition. We gave the KNN model a hyperparameter (neighbors) that was tuned using a tuning grid. Then, these models were fit on out-of-sample data and we found that our linear model clearly outperformed the medium model from class. However, our KNN model heavily outperformed even our improved linear model. This exercise illustrates the capability of KNN models to adapt to non-linearities of the data in order to achieve better fits in predicting pricing of houses. 
+We built two models-a linear model and a KNN model-to predict the price of houses. The base model appeared to perform quite well, so we decided to tweak it by feature engineering to improve the accuracy. We standardized numeric variables to values between (0,1), applied a log transformation to the price variable and created dummy variables for all "character" encoded variables. Next, both our linear and KNN regression models were trained on 3 folds without repetition. We gave the KNN model a hyperparameter (neighbors) that was tuned using a tuning grid. Then, these models were fit on out-of-sample data and we found that our linear model clearly outperformed the medium model from class. However, our KNN model heavily outperformed even our improved linear model. This exercise illustrates the capability of KNN models to adapt to non-linearities of the data in order to achieve better fits in predicting pricing of houses. 
 
 ## Problem 3: Classification and retrospective sampling
 ```{r}
@@ -415,7 +413,7 @@ german_credit %>%
   kbl(format = "pipe")
 
 ```
-# Our model is accurate roughly 74.4 percent of the time, which is not ideal since our null model that assumes no one will default would be correct 70 percent of the time. We believe the data is not likely ideal for predicting due to the weight of the poorly sampled history variable. Specifically, observe the vast disparity in sampling above.
+Our model is accurate roughly 74.4 percent of the time, which is not ideal since our null model that assumes no one will default would be correct 70 percent of the time. We believe the data is not likely ideal for predicting due to the weight of the poorly sampled history variable. Specifically, observe the vast disparity in sampling above.
 
 ## Problem 4: Children and Hotel Reservations
 ```{r}
@@ -752,4 +750,4 @@ tibble(fold = seq(1, 20, 1),
 mean_err <- sum(probs[1,] - probs[2,]) / 20
 glue::glue("The average mean error is {mean_err}")
 ```
-# The sum of probabilities is fairly similar across folds. 
+The sum of probabilities is fairly similar across folds. 
