@@ -1,0 +1,675 @@
+---
+title: "HW3"
+author: "Areeya Aksornpan, Zayd Abdalla"
+date: "4/9/2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      cache = TRUE,
+                      warning = FALSE, 
+                      message = FALSE)
+
+
+library(tidyverse)
+library(tidymodels)
+library(estimatr)
+library(tictoc)
+library(kableExtra)
+library(modelsummary)
+library(janitor)
+library(patchwork)
+library(ggmap)
+library(ggthemes)
+library(maps)
+library(mapdata)
+library(vip)
+library(rpart.plot)
+library(baguette)
+```
+
+```{r}
+read_data <- function(df) {
+
+  full_path <- paste("https://raw.githubusercontent.com/jgscott/ECO395M/master/data/", 
+                     df, sep = "")
+  df <- read_csv(full_path)
+  return(df)
+}
+```
+
+# What causes what?
+## Q1. Why can’t I just get data from a few different cities and run the regression of “Crime” on “Police” to understand how more cops in the streets affect crime?
+This problem poses a causal question, for which establishing a causal relationship is rather complicated. For instance, cities with high levels of crime may have an incentive to hire more police wheras Cities with low crime may have fewer police. Nonetheless, there is potential for this relationship to be confounding due to variation in cities, which makes establishing causality more complicated without controlling for other factors.
+
+## Q2. How were the researchers from UPenn able to isolate this effect? Briefly describe their approach and discuss their result in the “Table 2” below, from the researchers’ paper.
+The researchers isolated this effect by selecting an example where there had been a lot of police for reasons unrelated to crime. This led the researchers to discover the terrorist alert system in DC. When the terror alert level goes to orange, extra police are put on the Mall and other parts of Washington. This means that the causal effect of police on crime can be better observed since the presence of the police is independent of street crime. As a result, the researchers found that more police is associated with less murder, robbery, and assault. As for the table, model 1 indicates that when the system is on high alert, crime falls by 7.316 units (units are unclear from model and problem). Model 2 is similar to model 1 and controls for metro ridership, but the conclusion is similar to model 1 in that more policing reduces crime by 6.046 units.
+
+## Q3. Why did they have to control for Metro ridership? What was that trying to capture?
+The researchers wanted to address the concern of citizens and tourists avoiding the capital when terrorist alerts are issued, which could mean there are less potential victims on the streets. So they controlled for metro ridership and found that levels of metro ridership were not diminished on days of high terror days. Specifically, while the effect of the police presence on decreasing crime was slightly reduced after controlling for metro ridership, the effect was still significant.
+
+## Q4. Below I am showing you “Table 4” from the researchers’ paper. Just focus on the first column of the table. Can you describe the model being estimated here? What is the conclusion?
+Column 1 models crime on the interaction of high alert and district 1, the interaction of high alert and other districts, and controls for metro ridership levels with the log of midday ridership. When there is a high alert, crime in District 1 decreases by 2.6 units (units are not clear from table or problem), controlling for ridership. This effect is statistically significant. Next, high alerts in other districts are associated with a small and not statistically significant decrease in crime. Since the police presence during a high alert is centralized around District 1, there is evidence that increasing police presence in DC decreases crime.
+
+# Predictive model building: Green Certification
+
+We explore data on commercial rental properties from across the United States to build a predictive model for revenue/ sq. ft. per calendar year, and to use this model to quantify the average change in rental income per square foot (whether in absolute or percentage terms) associated with green certification, holding other features of the building constant.
+```{r green_housing_import}
+green_buildings <- 
+  read_data("greenbuildings.csv") %>%
+  janitor::clean_names() %>%
+  # Revenue per sq ft
+  mutate(rev_per_sqft = rent * leasing_rate) 
+
+```
+
+```{r splits_resamples}
+# Split into train/test split
+set.seed(395)
+green_split <- initial_split(green_buildings, strata = rev_per_sqft)
+green_train <- training(green_split)
+green_test <- testing(green_split)
+
+# v-fold
+set.seed(3951)
+green_folds <- vfold_cv(green_train, v = 3, strata = rev_per_sqft)
+green_folds
+```
+
+
+```{r feat_eng}
+green_recipe <- 
+  recipe(rev_per_sqft ~ ., green_train) %>% 
+  update_role(contains("id"), new_role = "ID") %>% # Declaring ID variables
+  step_mutate(
+    green_certf = case_when(
+      leed == 1 ~ "leed",
+      energystar == 1 ~ "energystar",
+      leed == 0 & energystar == 0 ~ "none"
+    )
+  ) %>%
+  step_rm(c(rent, leasing_rate, leed, energystar, green_rating, total_dd_07, city_market_rent)) %>% # Remove confounders
+  step_nzv(all_predictors(), freq_cut = 0, unique_cut = 0) %>% # remove zero variance vars
+  step_novel(all_nominal()) %>% # Assigns previously unseen factor level to a new value 
+  step_unknown(all_nominal()) %>% # NA's are categorized as unknowns
+  step_medianimpute(all_numeric(), -all_outcomes(), -has_role("ID"))  %>% # Replace missing numeric obs with median values
+  step_dummy(all_nominal(), -has_role("ID")) # Code categorical as dummy variables
+
+```
+
+
+## Decision Tree
+
+
+```{r tree_spec_grid}
+tree_spec <- decision_tree(
+  cost_complexity = tune(), 
+  tree_depth = tune(),      
+  min_n = tune()            
+) %>%
+  set_engine("rpart") %>%   
+  set_mode("regression")
+
+tree_spec
+
+# Tuning Grid
+tree_grid <- 
+  grid_regular(
+    cost_complexity(), 
+    tree_depth(), 
+    min_n(), 
+    levels = 4
+    )
+
+tree_grid
+```
+
+
+```{r}
+# WF
+workflow_tree <- 
+  workflow() %>% 
+  add_recipe(green_recipe) %>%
+  add_model(tree_spec)
+```
+
+```{r}
+# try all param values on resampled datasets
+doParallel::registerDoParallel()
+
+set.seed(3452)
+
+tree_resample <- 
+  tune_grid(
+    workflow_tree,
+    resamples = green_folds,
+    grid = tree_grid, 
+    metrics = metric_set(rmse, rsq, mae)
+  )
+
+tree_resample
+
+# evaluate model
+# collect_metrics(tree_rs)
+
+autoplot(tree_resample) + theme_clean()
+```
+
+```{r final_tree_fit}
+lowest_tree_rmse <- select_best(tree_resample, "rmse")
+
+## Out of sample performance
+
+# Finalize WF
+final_workflow <- 
+  workflow_tree %>% 
+  finalize_workflow(lowest_tree_rmse)
+
+final_workflow
+
+final_resample <- last_fit(final_workflow, green_split)
+
+
+```
+
+```{r}
+# look at test data
+collect_metrics(final_resample)[,1:3] %>% kbl(digits = 3, format = "pipe")
+
+# look at predictions
+final_resample %>%
+  collect_predictions() %>%
+  ggplot(aes(rev_per_sqft, .pred)) +
+  geom_point(alpha = 0.5, color = "navy") +
+  geom_abline(slope = 1, lty = 2, color = "red", alpha = 0.5) +
+  theme_clean() +
+  coord_fixed()
+```
+
+### KNN-regression
+
+```{r}
+knn_spec <-
+  nearest_neighbor(
+    mode = "regression",
+    neighbors = tune("K")
+  ) %>%
+  set_engine("kknn")
+
+# WF
+workflow_knn <-
+  workflow() %>% 
+  add_recipe(green_recipe) %>%
+  add_model(knn_spec)
+
+knn_set <-
+  parameters(workflow_knn) %>%
+  update(K = neighbors(c(1, 50)))
+
+set.seed(3952)
+knn_grid <-
+  knn_set %>%
+  grid_max_entropy(size = 50)
+
+knn_grid_search <-
+  tune_grid(
+    workflow_knn,
+    resamples = green_folds,
+    grid = knn_grid
+  )
+```
+
+
+```{r best_knn}
+# choose best model
+lowest_rmse_knn <- select_best(knn_grid_search, "rmse")
+
+best_k <- as.numeric(lowest_rmse_knn$K)
+
+# plot rmse 
+collect_metrics(knn_grid_search) %>%
+  filter(.metric == "rmse") %>% 
+  ggplot() + 
+  geom_point(aes(x = K, y = mean), color = "navy", alpha = 0.5) +
+  geom_vline(aes(xintercept = best_k), linetype = 3, color = "red") +
+  labs(y = "RMSE") +
+  theme_clean()
+```
+
+```{r knn_final}
+## Out of sample performance
+
+# Finalize WF
+final_workflow_knn <- 
+  workflow_knn %>% 
+  finalize_workflow(lowest_rmse_knn)
+
+final_workflow_knn
+
+# fit the model 
+last_fit(
+  final_workflow_knn,
+  green_split
+  ) %>%
+  collect_metrics() %>% 
+  select(1:3) %>%
+  kbl(digits = 3, format = "pipe")
+```
+
+### LASSO
+
+Here, I construct a penalized regression, or LASSO model, with a tuneable penalty.
+
+```{r lasso_spec}
+lasso_spec <- 
+  linear_reg(
+    penalty = tune(), 
+    mixture = 1
+    ) %>%
+  set_engine("glmnet")
+
+# WF
+workflow_lasso <-
+  workflow() %>% 
+  add_recipe(green_recipe) %>%
+  add_model(lasso_spec)
+
+lambda_grid <- grid_regular(penalty(), levels = 50)
+```
+
+```{r tune_grid_lasso}
+doParallel::registerDoParallel()
+set.seed(3955)
+lasso_grid <- 
+  tune_grid(
+    workflow_lasso,
+    resamples = green_folds,
+    grid = lambda_grid
+  )
+```
+
+```{r lowest_rmse_lasso}
+lowest_rmse <- 
+  lasso_grid %>%
+  select_best("rmse")
+
+final_lasso <- 
+  finalize_workflow(
+    workflow_lasso,
+    lowest_rmse
+  )
+
+final_lasso %>%
+  fit(green_train) %>%
+  pull_workflow_fit() %>%
+  vi(lambda = lowest_rmse$penalty) %>%
+  mutate(
+    Importance = abs(Importance),
+    Variable = fct_reorder(Variable, Importance)
+  ) %>%
+  ggplot(aes(x = Importance, y = Variable, fill = Sign)) +
+  geom_col() +
+  scale_fill_brewer(palette = "Set2") +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(y = NULL) +
+  theme_clean()
+```
+Though we took 3 different approaches, all models are fairly similar in accuracy of predictions. By consulting the vip plots, we find that Green Certification does not appear to be an important feature in determining rent price per sq. ft. Rather, gas costs and electricity costs appear to be the most important in predicting the price of rent.
+```{r lasso_lastfit}
+last_fit(
+  final_lasso,
+  green_split
+  ) %>%
+  collect_metrics() %>% 
+  select(1:3) %>%
+  kbl(digits = 3, format = "pipe")
+```
+
+The constructed models all take slightly differently approaches but converge (generally) on predictive accuracy. Across the tree-based model, the KNN-regression, and the penalized (LASSO) regression, none point to `green certification` being an important feature in determining rent price per square foot (See the VIP plots). It is, however, important to note that gas costs and electricity costs are hugely important and work counter to one another (positive and negative effect, respectively). Now, this may be a modeling problem. These covariates may be too correlated to effectively parse variation with green certified buildings. Since the energy certification certainly affects the value of these two parameters for the rental price in a calendar year, these models may contain endogeneity issues. Thought, I would argue that since these covariates are the most important in predicting price, the green certification is likely to matter with respect to price and that change emerges through variation in the gas and electricity costs.
+
+## Predictive model building: California housing
+
+We explore census-tract level on residential housing in the state of California to build a predictive model for median house value.
+
+```{r ca_housing_import}
+CAhousing <- 
+  read_data("CAhousing.csv") %>%
+  janitor::clean_names()
+```
+
+
+```{r cali_map}
+states <- map_data("state")
+county <- map_data("county")
+ca_df <- subset(states, region == "california")
+ca_county <- subset(county, region == "california")
+
+ca_base <- 
+  ggplot() + 
+  coord_fixed(1.3) + 
+  geom_polygon(data = ca_df, 
+               aes(x = long, y = lat, group = group),
+               color = "black", fill = "white")  + 
+  geom_polygon(data = ca_county, 
+               aes(x = long, y = lat, group = group), 
+               fill = NA, color = "dark grey") +
+  geom_polygon(data = ca_df,
+               aes(x = long, y = lat, group = group), 
+               color = "black", fill = NA)
+
+ca_base + 
+  geom_point(data = CAhousing, 
+    aes(x = longitude, y = latitude, 
+        color = median_house_value, size = population), 
+    alpha = 0.5) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme_map() +
+  scale_color_distiller(palette = "RdYlBu", labels = comma) +
+  labs(title = "California Housing",
+       x = "Longitude", y = "Latitude",
+       color = "Median House Value (in USD)", 
+       size = "Population")
+```
+
+```{r}
+set.seed(395)
+
+# splits
+housing_split <- initial_split(CAhousing, prop = 0.75, strata = median_house_value)
+housing_train <- housing_split %>% training()
+housing_test <- housing_split %>% testing()
+
+# vfold
+housing_vfold <- vfold_cv(housing_train, v = 10, strata = median_house_value)
+```
+
+
+```{r}
+set.seed(395)
+
+# LM as a baseline
+lm_model <- 
+  linear_reg() %>% 
+  set_engine('lm') %>% 
+  set_mode('regression')
+
+# Recipe
+lm_recipe <- 
+  # fit on all variables
+  recipe(median_house_value ~ ., data = housing_train) %>%
+  # log price
+  step_log(median_house_value) %>%
+  # standardize
+  step_range(total_bedrooms, total_rooms, population, housing_median_age, median_income) %>%
+ 
+  step_ns(longitude, deg_free = tune("long df")) %>% 
+  step_ns(latitude,  deg_free = tune("lat df"))
+
+
+grid_vals <- seq(2, 22, by = 2)
+spline_grid <- expand.grid(`long df` = grid_vals, `lat df` = grid_vals)
+
+
+housing_parameters <- 
+  lm_recipe %>% 
+  parameters() %>% 
+  update(
+    `long df` = spline_degree(), 
+    `lat df` = spline_degree()
+  )
+
+housing_parameters
+
+# WF
+lm_workflow <- 
+  workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(lm_recipe)
+
+tic()
+lm_res <- 
+  lm_workflow %>%
+  tune_grid(resamples = housing_vfold, grid = spline_grid)
+toc()
+
+lm_est <- collect_metrics(lm_res)
+
+lm_rmse_vals <- 
+  lm_est %>% 
+  dplyr::filter(.metric == "rmse") %>% 
+  arrange(mean)
+
+lm_final <-
+  lm_rmse_vals %>%
+  filter(.metric == "rmse") %>%
+  filter(mean == min(mean))
+
+
+lm_final_workflow <- 
+  lm_workflow %>% 
+  finalize_workflow(lm_final)
+
+# fit the model using workflow to test set
+lm_fit <- 
+  lm_final_workflow %>% 
+  last_fit(split = housing_split)
+
+# Model Performance
+lm_fit %>% collect_metrics()
+```
+
+
+```{r}
+housing_train %>% 
+  dplyr::select(median_house_value, longitude, latitude) %>% 
+  tidyr::pivot_longer(cols = c(longitude, latitude), 
+                      names_to = "predictor", values_to = "value") %>% 
+  ggplot(aes(x = value, median_house_value)) + 
+  geom_point(alpha = .1) + 
+  geom_smooth(se = FALSE, method = lm, formula = y ~ splines::ns(x, df = 3),  col = "red") +
+  geom_smooth(se = FALSE, method = lm, formula = y ~ splines::ns(x, df = 16)) +
+  scale_y_log10() +
+  theme_clean() +
+  facet_wrap(~ predictor, scales = "free_x")
+```
+
+```{r}
+# Obtain test set predictions data frame
+lm_results <- 
+  lm_fit %>% 
+  # save pred results
+  collect_predictions()
+
+lm_results <- 
+  lm_results %>% 
+  bind_cols(housing_test) %>% 
+  rename(median_house_value_log = `median_house_value...4`,
+         median_house_value = `median_house_value...14`) 
+```
+
+```{r}
+# plot pred v actual
+lm_results %>%
+  ggplot(aes(x = .pred, y = median_house_value_log)) +
+  geom_point(color = '#345EA1', alpha = 0.25)  +
+  geom_abline(intercept = 0, slope = 1, color = 'red') +
+  labs(title = 'Linear Regression Results',
+       x = 'Predicted Price',
+       y = 'Actual Price') + 
+  theme_clean()
+```
+
+```{r}
+p1 <- 
+  ca_base + 
+  geom_point(data = lm_results, 
+    aes(x = longitude, y = latitude, 
+        color = .pred, size = population), 
+    alpha = 0.4) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme_map() +
+  scale_color_distiller(palette = "RdYlBu", labels = comma,
+                        limits = c(9, 14)) +
+  labs(title = "Predicted ",
+       x = "Longitude", y = "Latitude",
+       color = "Median House Value (in USD)", 
+       size = "Population")
+
+p2 <- 
+  ca_base + 
+  geom_point(data = lm_results, 
+    aes(x = longitude, y = latitude, 
+        color = median_house_value_log, size = population), 
+    alpha = 0.4) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme_map() +
+  scale_color_distiller(palette = "RdYlBu", labels = comma,
+                        limits = c(9, 14)) +
+  labs(title = "Actual",
+       x = "Longitude", y = "Latitude",
+       color = "Median House Value (in USD)", 
+       size = "Population")
+
+p1 + p2 + 
+  plot_layout(guides = 'collect') +
+  plot_annotation(title = "California Housing from the Linear Model")
+```
+
+
+```{r}
+ca_base + 
+  geom_point(data = lm_results, 
+    aes(x = longitude, y = latitude, 
+        color = median_house_value_log - .pred, size = population), 
+    alpha = 0.4) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme_map() +
+  scale_color_distiller(palette = "RdYlBu", labels = comma) +
+  labs(title = "California Housing from log error",
+       x = "Longitude", y = "Latitude",
+       color = "Median House Value (in USD)", 
+       size = "Population")
+```
+
+```{r}
+set.seed(395)
+
+# specify knn model
+knn_model <- 
+  
+  nearest_neighbor(neighbors = tune(), weight_func = tune()) %>% 
+  set_engine('kknn') %>% 
+  set_mode('regression') %>%
+  translate()
+
+# recipe
+knn_recipe <- 
+  # fit on all variables
+  recipe(median_house_value ~ ., data = housing_train) %>%
+  # log price
+  step_log(median_house_value) %>%
+  # standardize
+  step_range(total_bedrooms, total_rooms, population, housing_median_age, median_income) %>%
+  
+  step_ns(longitude, deg_free = tune("long df")) %>% 
+  step_ns(latitude,  deg_free = tune("lat df"))
+
+# WF
+knn_workflow <- 
+  workflow() %>% 
+  add_model(knn_model) %>% 
+  add_recipe(knn_recipe)
+```
+
+After feature engineering and specifying the model, we tune the hyperparameter
+
+```{r}
+knn_parameters <- 
+  knn_workflow %>% 
+  parameters() %>% 
+    update(
+    `long df` = spline_degree(c(2, 18)), 
+    `lat df` = spline_degree(c(2, 18)),
+    neighbors = neighbors(c(3, 50)),
+    weight_func = weight_func(values = c("rectangular", "inv", "triangular"))
+  )
+
+ctrl <- control_bayes(verbose = TRUE)
+
+tic()
+knn_search <- 
+  tune_bayes(knn_workflow, resamples = housing_vfold, initial = 5, iter = 10,
+                         paramet_info = knn_parameters, control = ctrl)
+toc()
+
+knn_final <-
+  knn_search %>%
+  collect_metrics() %>% 
+  dplyr::filter(.metric == "rmse") %>% 
+  filter(mean == min(mean))
+
+
+knn_final_workflow <- 
+  knn_workflow %>% 
+  finalize_workflow(knn_final)
+
+# fit the model
+knn_fit <- 
+  knn_final_workflow %>% 
+  last_fit(split = housing_split)
+
+# Model Performance
+knn_fit %>% 
+  collect_metrics() %>%
+  select(1:3) %>%
+  kbl(digits = 3, format = "pipe")
+```
+
+Bit better performance than linear model.
+```{r}
+knn_final_workflow
+```
+
+```{r}
+# Test set predictions
+knn_results <- 
+  knn_fit %>% 
+  # save pred results
+  collect_predictions()
+```
+
+```{r}
+# plot pred v actual
+knn_results %>%
+  ggplot(aes(x = .pred, y = median_house_value)) +
+  geom_point(color = '#004EA1', alpha = 0.25)  +
+  geom_abline(intercept = 0, slope = 1, color = 'red') +
+  labs(title = 'KNN Regression Results',
+       x = 'Predicted Price',
+       y = 'Actual Price') + 
+  theme_clean() 
+```
+Judging by the RMSE, it would indicate that the KNN model is an improvement. Further feature engineering or different modeling may be needed to yield an even better model. Visually, we can confirm that the knn model seems to fit the data better compared to the linear model (pg 23). 
+
+```{r}
+# then use this map
+knn_results <- 
+  knn_results %>%
+    bind_cols(housing_test) %>% 
+    rename(median_house_value_log = `median_house_value...4`,
+           median_house_value = `median_house_value...14`) 
+
+knn_results %>% 
+  arrange(median_house_value_log) %>%
+  mutate(id = row_number()) %>%
+  ggplot(aes(x = id, y = median_house_value_log)) + 
+  geom_segment(aes(xend = id, yend = .pred), alpha = .2) +
+  geom_point(aes(y = .pred), shape = 1) + 
+  geom_point(color = "red", shape = 1, alpha = 0.5) +
+  labs(x = "ID variables", y = "Logged median house value") + 
+  theme_clean()
+```
+
+
+
