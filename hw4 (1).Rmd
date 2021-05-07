@@ -516,5 +516,6 @@ num_rows <- final_df %>% nrow()
 
 num_correct / num_rows
 ```
+We began our text data analysis by exploring our train/test splits. We created document=term-matrices from the corpuses. Then, we used a naive bayes classification to predict an author based on a dictionary unique to each piece. Lastly, we trained our model to our test set to predict authors.
 
 From a sample of 50 authors, our model predicted correctly with 67.24% accuracy. 
