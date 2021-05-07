@@ -1,6 +1,6 @@
 ---
 title: "HW 4"
-author: "Zayd Abdalla"
+author: "Zayd Abdalla, Areeya Aksornpan"
 date: "5/6/2021"
 output: word_document
 ---
@@ -381,5 +381,140 @@ plot(subrules, method="graph", control=list(layout=igraph::in_circle()))
 
 
 #Question 4.Author Attribution
+## Author Attribution
+
+```{r}
+## Collect data
+
+#Training data
+train_data <- readtext(Sys.glob('~/Documents/GitHub/ECO395M/data/ReutersC50/C50train/*'))
+# head(train_data$text, n = 1)
+
+#Testing data
+test_data <- readtext(Sys.glob('~/Documents/GitHub/ECO395M/data/ReutersC50/C50test/*'))
+```
 
 
+```{r}
+#Author names
+author_names <- as.data.frame(rep(basename(list.dirs('~/Documents/GitHub/ECO395M/data/ReutersC50/C50train')), each = 50))
+author_names <- author_names[-(1:50),]
+
+#Assign author name to Text
+test_data$author <- author_names
+train_data$author <- author_names
+
+#Dropping ID column
+test_data <- test_data[-1]
+train_data <- train_data[-1]
+
+#Converting author column to factor
+test_data$author <- as.factor(test_data$author)
+train_data$author <- as.factor(train_data$author)
+
+table(train_data$author) %>% kbl("pipe")
+```
+
+
+
+``` {r}
+
+#Create corpus
+test_cp <- Corpus(VectorSource(test_data$text))
+train_cp <- Corpus(VectorSource(train_data$text))
+
+#Clean corpus
+test_cp <-
+  test_cp %>%
+  tm_map(., content_transformer(tolower)) %>%
+  tm_map(., content_transformer(removeNumbers)) %>%
+  tm_map(., content_transformer(removePunctuation)) %>%
+  tm_map(., content_transformer(stripWhitespace)) %>%
+  tm_map(., content_transformer(removeWords), stopwords("SMART"))
+
+#inspect(test_cp[1])
+wordcloud(test_cp, min.freq = 40, random.order = FALSE)
+```
+
+
+``` {r}
+train_cp <-
+  train_cp %>%
+  tm_map(., content_transformer(tolower)) %>%
+  tm_map(., content_transformer(removeNumbers)) %>%
+  tm_map(., content_transformer(removePunctuation)) %>%
+  tm_map(., content_transformer(stripWhitespace)) %>%
+  tm_map(., content_transformer(removeWords), stopwords("SMART"))
+```
+
+
+
+``` {r}
+#Document term matrix (sparse matrices)
+test_dtm <- DocumentTermMatrix(test_cp)
+train_dtm <- DocumentTermMatrix(train_cp)
+
+#inspect(train_dtm)
+```
+
+
+
+``` {r}
+##Naive Bayes Classification
+fr_terms <- findFreqTerms(train_dtm, 5)
+
+#Saving List using Dictionary() Function
+Dictionary <- function(x) {
+  if (is.character(x)) {
+    return(x)
+  }
+  stop('x is not a character vector')
+}
+
+dict_data <- Dictionary(findFreqTerms(train_dtm, 5))
+
+#Appending Document Term Matrix to Train and Test Dataset 
+train_data <- DocumentTermMatrix(train_cp, list(dict_data))
+test_data <- DocumentTermMatrix(test_cp, list(dict_data))
+
+#Converting the frequency of word to count
+cv_count <- function(x) {
+  x <- ifelse(x > 0, 1, 0)
+  x <- factor(x, levels = c(0, 1), labels = c("No", "Yes")) 
+  return(x)
+}
+
+#Appending count function to Train and Test Dataset
+train_data <- apply(train_data, MARGIN = 2, cv_count)
+test_data <- apply(test_data, MARGIN = 2, cv_count)
+
+#Train model
+class_data <- naiveBayes(train_data, train_data$author)
+
+prdtest_data <- predict(class_data, test_data)
+#CrossTable(prdtest_data, test_data$author,
+#            prop.chisq = FALSE, prop.t = FALSE,
+#            dnn = c('predicted', 'actual'))
+```
+
+
+
+``` {r}
+final_df <- 
+  tibble(
+    "predicted" = prdtest_data,
+    "actual" = test_data$author
+  )
+
+num_correct <- 
+  final_df %>% 
+  mutate(correct = if_else(predicted == actual, 1, 0)) %>%
+  pull(correct) %>%
+  sum()
+
+num_rows <- final_df %>% nrow()
+
+num_correct / num_rows
+```
+
+From a sample of 50 authors, our model predicted correctly with 67.24% accuracy. 
