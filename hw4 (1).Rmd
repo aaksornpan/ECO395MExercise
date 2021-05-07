@@ -1,0 +1,385 @@
+---
+title: "HW 4"
+author: "Zayd Abdalla"
+date: "5/6/2021"
+output: word_document
+---
+
+#Question 1: Clustering and PCA for wine
+
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+library(ggplot2)
+library(LICORS)  
+library(foreach)
+library(mosaic)
+library(tidyverse)
+library(ISLR)
+library(cluster)
+library(ggalt)
+library(ggfortify)
+library(HSAUR)
+library(plotly)
+library(GGally)
+library(arules)
+library(arulesViz)
+library(splitstackshape)
+library(tm)
+library(wordcloud)
+library(readtext)
+library(factoextra) 
+library(RColorBrewer)
+library(kableExtra)
+library(LICORS) 
+```
+
+```{r, echo=FALSE, message=FALSE, include=FALSE}
+#load data 
+data_set<-'https://raw.githubusercontent.com/jgscott/ECO395M/master/data/wine.csv'
+wine<-read.csv(url(data_set))
+```
+
+##Cluster
+We began by clustering to explore if clustering could distinguish between reds and whites along with different levels of quality. We removed the color and quality columns and rescaled other variables for unsupervised analysis.
+
+```{r include=FALSE}
+wine_data = wine[,c(1:11)]
+#Rescaling
+wine_data = scale(wine_data, center = TRUE , scale =TRUE)
+```
+
+We utilized 2 centers to test the performance of clustering in distinguishing between wine color.
+
+##Color
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, results=TRUE}
+cluster_2_centers=kmeans(wine_data, 2, nstart=50)
+wine1 = cbind(wine, cluster_2_centers$cluster)
+colnames(wine1)[14] <- "cluster"
+df_wine_cluster_red1 <- wine1[wine1$cluster == 1 & wine1$color == 'red',]
+df_wine_cluster_white1 <- wine1[wine1$cluster == 1& wine$color == 'white',]
+df_wine_cluster_red2 <- wine1[wine1$cluster == 2 & wine1$color == 'red',]
+df_wine_cluster_white2 <- wine1[wine1$cluster == 2 &wine$color == 'white',]
+if(nrow(df_wine_cluster_red1) > nrow(df_wine_cluster_red2))
+ { df_wine_cluster_red2 <- df_wine_cluster_red1 }
+if(nrow(df_wine_cluster_white2) > nrow(df_wine_cluster_white1))
+  { df_wine_cluster_white1 <- df_wine_cluster_white2 }
+df_true_wine_red <- wine1[wine1$color == 'red',]
+df_true_wine_white <- wine1[wine1$color == 'white',]
+
+ggplot (data = wine1 , aes(x=pH , y=density, shape = factor(color))) +
+  geom_point(data = df_true_wine_red, aes(x=pH, y=density, color = factor(cluster)),size = 1) +
+  geom_encircle(data = df_wine_cluster_red2, aes(x=pH, y=density) ) +
+  labs(title = "Red Wine Cluster",
+        subtitle = "Encircled red cluster for red wines")
+  
+ggplot (data = wine1 , aes(x=pH , y=density , shape = factor(color) )) +
+  geom_point(data = df_true_wine_white, aes(x=pH, y=density, color = factor(cluster)),size = 1) +
+  geom_encircle(data = df_wine_cluster_white1, aes(x=pH, y=density) ) +
+  labs(title = "White Wine Clustering",
+        subtitle = "Encircled white cluster for white wines")
+xtabs(~cluster_2_centers$cluster + wine1$color)
+table1 = xtabs(~cluster_2_centers$cluster + wine1$color)
+```
+
+```{r accuracy, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+accurate = (table1[1,2] + table1[2,1]) / sum(table1) %>% round(3)
+```
+
+The plots show us that for each cluster, the points within the clusters overlap well with the wine color. We support this with a confusion matrix, where the accuracy rate is `r accurate`. As a result, our clustering is capable of distinguishing reds from the whites by using 2 centers and pH (chemical properties).
+
+
+##Quality
+```{r quality_distribution, echo=FALSE}
+ggplot(wine)+
+  geom_bar(aes(x = quality),  fill = "blue" ) + scale_x_discrete(limits=c("1","2","3","4","5","6","7","8","9","10"))
+```
+
+There are no 1,2 and 10 categories, so we opted for 7 clusters corresponding to quality rankings from 3-9.
+
+
+```{r echo=FALSE, warning=FALSE, results=TRUE}
+quality_centers=kmeans(wine_data, 7, nstart=50)
+qplot(wine$quality, fill = factor(quality_centers$cluster))
+```
+
+
+```{r echo=FALSE, message=FALSE, results=TRUE}
+#cluster result
+xtabs(~quality_centers$cluster + wine$quality)
+table2 = xtabs(~quality_centers$cluster + wine$quality)
+```
+
+
+We created a table that shows us each cluster and the quality levels of wine. Many of the clusters contained mostly wines in the 5-6 or 5-7 range, but in this case, it doesn't seem our clustering was able to distinguish lower quality from higher quality wines like we did with color.
+
+
+##PCA
+
+```{r include=FALSE, results=TRUE}
+pr_wine = prcomp(wine_data, scale = TRUE)
+summary(pr_wine)
+plot(pr_wine) 
+biplot(pr_wine)
+scores = pr_wine$x
+loadings = pr_wine$rotation
+PCA_cluster = kmeans(scores[,1:3], 2, nstart=50)
+xtabs(~PCA_cluster$cluster + wine$color)
+tablePCA = xtabs(~PCA_cluster$cluster + wine$color)
+print(tablePCA)
+```
+
+
+```{r echo=FALSE, results=TRUE}
+qplot(scores[,1], scores[,2], color=factor(wine$color), xlab='Component 1', ylab='Component 2')
+```
+We began by search for the most important components (i.e. have the highest proportion of variance among features) and draw a graph of the PC from highest variance to the lowest variance. We found that PC1 and PC2 are the most important features with variances of 0.2754 and 0.2267, respectively. Once again, we choose K=2 as we did when clustering. From the graph above, we can clearly see PCA does quite well in distinguishing reds from whites. There are two main clusters with very little overlap.
+
+```{r include=FALSE}
+accurate2 = (tablePCA[1,1] + tablePCA[2,2]) / sum(table1) %>% round(4)
+```
+
+We create another confusion matrix and observe that With `r accurate2` < `r accurate`, we find that eliminating dimensions prior to clustering performed worse than just using K-mean clustering.
+
+Move on to attempt at distinguish wine quality, first we conduct PCA on rescaled wine data.
+
+Similar to simple K-mean clustering, PCA does not perform well in distinguishing wines with different quality levels. The graph is blurry. Different quality levels of wine center in the same area with the similar component 1/component 2 variance.
+
+```{r echo=FALSE, results=TRUE}
+qplot(scores[,1], scores[,2], color=as.factor(wine$quality), xlab='Component 1', ylab='Component 2')
+```
+
+Next, we apply PCA before trying to conduct a 7 cluster. However, as the graph below represents, it does not help us to distinguish between different quality of wine much better than just PCA.
+
+
+```{r graph4.1.12, echo=FALSE, warning=FALSE}
+# table for the correctly clustering
+PCA_cluster2 = kmeans(scores[,1:4], 7, nstart=20)
+xtabs(~PCA_cluster2$cluster + wine$quality)
+tablePCA = xtabs(~PCA_cluster2$cluster + wine$quality)
+```
+As observed from the table above, the clusters misidentified several observations, rendering it unhelpful in distinguishing wine quality.
+
+#Question 2: Market segmentation
+
+##Data Cleaning
+```{r, include=FALSE}
+data_set2 <- 'https://raw.githubusercontent.com/jgscott/ECO395M/master/data/social_marketing.csv'
+sm <- read.csv(url(data_set2))
+sm = sm[-c(1)]
+sm = subset(sm, select = -c(chatter,spam,adult,uncategorized))
+sm = na.omit(sm)
+```
+
+From the graph below, we see that photo sharing and health nutrition rank as the two most popular categories for tweets. But there is still a wide range of the other tweet categories that may be worth considering in order to broaden our market. Intuitively, we chose to cluster in order to group similar followers and their tweets to better utilize market segments for product promotion.
+
+## Tweet Plot by Category
+```{r, include=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+count_tweets = apply(sm, MARGIN = 2, FUN=sum)
+total_entries = sum(count_tweets)
+tweets = count_tweets / total_entries
+tweets = as.data.frame(t(tweets))
+tweets_melt = reshape2::melt(tweets)
+ggplot(tweets_melt,aes(x=factor(reorder(variable, value)),y=value)) +
+  geom_point(col="green", size=4) + theme_classic() + coord_flip() + 
+  labs(x="Categories",y="Proportion of Total Tweets") +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1)) + 
+  geom_segment(aes(x=factor(reorder(variable, value)), 
+                   xend=factor(reorder(variable, value)), 
+                   y=min(value), 
+                   yend=max(value)), 
+               size=0.25)
+```
+##Rescale data and K grid-CH grid plot
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+
+sm_rescale = scale(sm, center=TRUE, scale=TRUE)
+k_grid = seq(2, 20, by=1)
+N=nrow(sm_rescale)
+CH_grid = foreach(k = k_grid, .combine='c') %do% {
+  cluster_k = kmeans(sm_rescale, k, nstart=50)
+  W = cluster_k$tot.withinss
+  B = cluster_k$betweenss
+  CH = (B/W)*((N-k)/(k-1))
+  CH
+}
+plot(k_grid, CH_grid)
+```
+For our methods, we searched for an optimal K to cluster by. We utilized a CH Index and found that K=2 has a max CH. But it didn't make sense conceptually to only observe 2 clusters of market segments for NutrientH20 (leaving several markets untapped felt wrong), so  we opted for 4 clusters to allow us to account for more market segments we can observe (i.e. more potential profits). 
+
+```{r optimal_ch}
+which.max(CH_grid)
+k_grid[which.max(CH_grid)] 
+```
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, results='hide'}
+### K=4 Clustering 
+cluster_all <- kmeanspp(sm_rescale, k=4)
+mseg1 = sm_rescale[,names(sort(cluster_all$centers[1,])[28:32])]
+pairs(mseg1, pch=20, col=cm.colors(4)[cluster_all$cluster]) 
+```
+This first market segment holds many interests—such as fitness, nutrition, and the outdoors—that pertain to active, healthy adults. We believe that for this market, NutrientH20 ought to market healthy or eco-friendly aspects of their products to attract this segment to their brand. Furthermore, hydration is a key aspect of activity and being in the outdoors, which the company can capitalize on.
+
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, results='hide'}
+mseg2 = sm_rescale[,names(sort(cluster_all$centers[2,])[28:32])]
+pairs(mseg2, pch=20, col=cm.colors(4)[cluster_all$cluster])
+```
+
+This next market segment contains interests—such as gaming, college, and tv/films—that appeal to college age students who enjoy gaming and media. With this group, advertising their products on twitch, which is a popular gaming-stream service, may help attract this segment to the brand. Additionally, appearing in advertisements on college campuses or media can help bolster the name recognition of this brand with this age group, potentially increasing profits.
+
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, results='hide'}
+mseg3 = sm_rescale[,names(sort(cluster_all$centers[3,])[28:32])]
+pairs(mseg3, pch=20, col=cm.colors(4)[cluster_all$cluster])
+```
+This cluster contains interests—such as parenting, religion, sports, and food—which all appeal to parents and more traditional/conservative Americans. The importance of this market segment is that marketing to one twitter user is potentially marketing to that user's family due to the nature of proximity. Furthermore, appealing to sports fans can lead to potential collaborations with sports leagues that these fans watch, which can improve brand appeal and consequently profits.
+
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, results='hide'}
+mseg4 = sm_rescale[,names(sort(cluster_all$centers[4,])[28:32])]
+pairs(mseg4, pch=20, col=cm.colors(4)[cluster_all$cluster])
+```
+
+This market segment contains topics—such as automotive, travel, news, and politics—that would appeal to older working adults. This demographic is (generally) actively earning higher incomes and are concerned with the latest information on new, politics, and cars. Tapping into this market successfully could be very rewarding due to the nature of the income for this segment compared to younger ones.
+
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, results='hide'}
+counts = matrix(0,nrow=1,ncol=4)
+for(c in 1:4){
+  counts[1,c] = length(cluster_all$cluster[cluster_all$cluster==c])/7882*100
+}
+counts
+```
+Young college students that game or are into media seem to make up the majority of the tweets from these groups, which may be the main group of interest for NutrientH20 to focus on marketing to, but not the only one.
+
+```{r, include=FALSE}
+# PCA with 5 ranks
+pc1 = prcomp(sm, scale=TRUE, rank=5)
+loadings = pc1$rotation
+scores = pc1$x
+```
+
+```{r, include=TRUE, echo=FALSE}
+par(mfrow=c(1,1))
+plot(pc1)
+```
+## Fun, Informative Visuals on Market Segments
+
+For the 4 graphs below, we utilize the two most important components and they each represent a twitter user of a certain demographic (market segment). Visually, the darker the color, the more a user's tweets relate to the topics attached to each demographic.
+
+```{r, include=TRUE, echo=FALSE, message=FALSE, results='hide'}
+sm["Active Adults"]=sm$food+sm$eco+sm$outdoors+sm$personal_fitness+sm$health_nutrition
+q1 = qplot(scores[,1], scores[,2], color = sm$'Active Adults', xlab='Component 1', ylab='Component 2')
+q1+scale_color_gradient(low="light green", high="dark green")
+
+sm["College Students"]=sm$music+sm$tv_film+sm$sports_playing+sm$online_gaming+sm$college_uni
+q2 = qplot(scores[,1], scores[,2], color = sm$'College Students', xlab='Component 1', ylab='Component 2')
+q2+scale_color_gradient(low="pink", high="purple")
+
+sm["Parents"]=sm$school+sm$food+sm$sports_fandom+sm$parenting+sm$religion
+q3 = qplot(scores[,1], scores[,2], color = sm$'Parents', xlab='Component 1', ylab='Component 2')
+q3+scale_color_gradient(low="skyblue", high="dark blue")
+
+sm["Working Adults"] = sm$automotive+sm$computers+sm$travel+sm$news+sm$politics
+q4 = qplot(scores[,1], scores[,2], color = sm$'Working Adults', xlab= 'Component 1', ylab= 'Component 2')
+q4+scale_color_gradient(low="orange", high="red")
+```
+
+ 
+
+#Question 3: Association rules for grocery purchases
+
+
+```{r include=FALSE}
+#load data and clean
+grocery_raw = read.table(url('https://raw.githubusercontent.com/jgscott/ECO395M/master/data/groceries.txt'),sep ="\t",fill=TRUE ,header = FALSE, stringsAsFactors = FALSE)
+grocery_raw$ID <- as.integer(rownames(grocery_raw))
+grocery_list = cSplit(grocery_raw, "V1", sep = ",", direction = "long")
+shoplist = split(x=grocery_list$V1, f= grocery_list$ID)
+shoplist = lapply(shoplist, unique)
+head(shoplist)
+shoptrans = as(shoplist, "transactions")
+summary(shoptrans)
+#We create a loop for support ranging from 0.009 (0.01 is hard to distinguish in later table due to rounding) to 0.05 and confidence from 0.2 to 0.5. We are looking for the maximum average lift. Ideally, we would get high lift values.
+sup = seq(.009,0.05,by=.01)
+con = seq(.2,0.5,by=.05)
+parmb = expand.grid(sup,con)
+colnames(parmb) = c('sup','con')
+nset = nrow(parmb)
+avg_inspection = rep(0,nset)
+for(i in 1:nset) {
+  groceryrules <- apriori(shoptrans, parameter=list(support=parmb[i,1], confidence=parmb[i,2], maxlen=5))
+  inspection=arules::inspect(groceryrules)
+  avg_inspection[i]=mean(inspection$lift)
+}
+```
+
+
+##Observe distribution of data
+```{r distribution, echo=FALSE}
+grocery_list$V1 %>% 
+  summary(maxsum=Inf) %>%
+  sort(decreasing = TRUE) %>%
+  head(10) %>%
+  barplot(las=2, col=c("green"),cex.names = 0.9)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#inspection=mean(inspection)
+parmb = cbind(parmb,avg_inspection)
+toPrint <- parmb[order(-parmb$avg_inspection),]
+head(toPrint,10)
+```
+
+From the table above, the findings that are best for support = 0.009 and confidence = 0.5 with a max average lift of 2.225524. Increasing the value of support is associated with higher sales including items of interest. However, we observe that there is a cost, which is the decrease in lift values. A slightly larger support value, however, would allow for more transactions and rules, but with a smaller effect on lift.  
+
+
+```{r make_rules, include = FALSE}
+detach(package:tm, unload=TRUE)
+groceryrules_final1<- apriori(shoptrans, 
+	parameter=list(support=.01, confidence=.4, maxlen=5))
+```
+
+```{r get_rules, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+df_final <- inspect(subset(groceryrules_final1, subset=lift > 2))
+```
+
+
+Subset for rules with lifts values greater than 2 because the mean is roughly that value and eliminate weakly associated rules. There remaains 29 strongly associated rules. From the sample, whole milk appears the most followed by other vegetables.
+
+
+```{r final_rules, include = FALSE}
+subset_groc = (subset(groceryrules_final1, subset=lift > 2))
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+plot(subset_groc,method="graph", control = list(type="items"))
+```
+
+The visualization above illustrates importance of basket items, with Whole milk and other vegetables ranking as the most common items. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+plot(groceryrules_final1, shading="order", control = list(main = "Two-key plot",
+  col=topo.colors(max(size(groceryrules_final1))-1L)))
+```
+
+
+The graph above is a two-key plot for all values as a function of support and confidence below.
+
+Below we have a matrix representations of the association rules, allowing us to match our matrix to lift values above and obtain the grocery items.
+
+```{r matrix_rules, message=FALSE, warning=FALSE, paged.print=FALSE}
+subrules <- sample(subset_groc, 20)
+plot(subset_groc, method="matrix", measure="lift", control=list(reorder='support/confidence'))
+plot(subrules, method="graph", control=list(layout=igraph::in_circle()))
+```
+
+  
+
+
+#Question 4.Author Attribution
+
+
